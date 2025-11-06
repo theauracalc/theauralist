@@ -620,6 +620,13 @@ header h1::after {
         letter-spacing: 4px;
     }
 
+    .admin-btn {
+        top: 10px;
+        right: 10px;
+        padding: 8px 16px;
+        font-size: 0.85rem;
+    }
+
     .search-filter-row {
         flex-direction: column;
     }
