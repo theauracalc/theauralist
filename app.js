@@ -13,6 +13,7 @@ let currentFilter = { letter: '', score: '', search: '' };
 let isAdmin = false;
 let editingPersonId = null;
 let isInitialized = false; // Prevent multiple initializations
+let allNews = []; // Breaking news items
 
 // Admin User ID - Get this from Supabase Auth after creating your admin account
 // Go to Supabase Dashboard → Authentication → Users → Copy your User ID
@@ -35,8 +36,13 @@ const adminBtn = document.getElementById('adminBtn');
 const adminControls = document.getElementById('adminControls');
 const loginModal = document.getElementById('loginModal');
 const editModal = document.getElementById('editModal');
+const newsModal = document.getElementById('newsModal');
 const loginForm = document.getElementById('loginForm');
 const personForm = document.getElementById('personForm');
+const newsForm = document.getElementById('newsForm');
+const newsTicker = document.getElementById('newsTicker');
+const newsList = document.getElementById('newsList');
+const newsTickerContainer = document.getElementById('newsTickerContainer');
 
 // Initial data (fallback if Supabase is not configured)
 const initialData = [
@@ -132,6 +138,7 @@ async function init() {
 
     try {
         await loadPeople();
+        await loadNews();
     } catch (error) {
         console.error('Error initializing:', error);
         // Fallback to local data
@@ -325,6 +332,7 @@ function updateAdminUI() {
         adminControls.style.display = 'none';
     }
     renderPeople(); // Re-render to show/hide edit buttons
+    renderNewsList(); // Re-render to show/hide delete buttons
 }
 
 // Login with Supabase Auth
@@ -497,6 +505,106 @@ function editPerson(id, name, score) {
     openModal(editModal);
 }
 
+// News Functions
+async function loadNews() {
+    try {
+        const { data, error } = await supabase
+            .from('news')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+            allNews = data;
+        } else {
+            allNews = [];
+        }
+
+        renderNewsTicker();
+        renderNewsList();
+    } catch (error) {
+        console.error('Error loading news:', error);
+        // If table doesn't exist, hide the ticker
+        if (newsTickerContainer) {
+            newsTickerContainer.style.display = 'none';
+        }
+    }
+}
+
+function renderNewsTicker() {
+    if (!newsTicker) return;
+
+    if (allNews.length === 0) {
+        newsTickerContainer.style.display = 'none';
+        return;
+    }
+
+    newsTickerContainer.style.display = 'flex';
+    
+    // Create duplicate items for seamless loop
+    const newsItems = allNews.map(news => 
+        `<span class="news-item">${escapeHtml(news.text)}</span>`
+    ).join('<span class="news-separator"> • </span>');
+    
+    // Duplicate for seamless scrolling
+    newsTicker.innerHTML = newsItems + '<span class="news-separator"> • </span>' + newsItems;
+}
+
+function renderNewsList() {
+    if (!newsList) return;
+
+    if (allNews.length === 0) {
+        newsList.innerHTML = '<p class="no-news">No news items. Add one above!</p>';
+        return;
+    }
+
+    newsList.innerHTML = allNews.map(news => `
+        <div class="news-list-item">
+            <div class="news-list-text">${escapeHtml(news.text)}</div>
+            ${isAdmin ? `<button class="delete-news-btn" onclick="deleteNews(${news.id})">🗑️ Delete</button>` : ''}
+        </div>
+    `).join('');
+}
+
+async function addNews(text) {
+    try {
+        const { error } = await supabase
+            .from('news')
+            .insert([{
+                text: text.trim()
+            }]);
+
+        if (error) throw error;
+
+        await loadNews();
+        newsForm.reset();
+    } catch (error) {
+        console.error('Error adding news:', error);
+        alert('Error adding news. Make sure the news table exists in Supabase!');
+    }
+}
+
+async function deleteNews(id) {
+    if (!confirm('Are you sure you want to delete this news item?')) {
+        return;
+    }
+
+    try {
+        const { error } = await supabase
+            .from('news')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+
+        await loadNews();
+    } catch (error) {
+        console.error('Error deleting news:', error);
+        alert('Error deleting news. Please try again.');
+    }
+}
+
 // Modal functions
 function openModal(modal) {
     modal.classList.add('show');
@@ -591,11 +699,44 @@ function setupEventListeners() {
     });
 
     sortBtn.addEventListener('click', toggleSort);
+
+    // News management button
+    document.getElementById('manageNewsBtn').addEventListener('click', () => {
+        renderNewsList();
+        openModal(newsModal);
+    });
+
+    // News form
+    newsForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = document.getElementById('newsText').value;
+        if (text.trim()) {
+            await addNews(text);
+        }
+    });
+
+    // Close news modal
+    document.getElementById('closeNewsModalBtn').addEventListener('click', () => {
+        closeModal(newsModal);
+    });
+
+    // Close news modal with X button
+    newsModal.querySelector('.close')?.addEventListener('click', () => {
+        closeModal(newsModal);
+    });
+
+    // Close news modal when clicking outside
+    window.addEventListener('click', (e) => {
+        if (e.target === newsModal) {
+            closeModal(newsModal);
+        }
+    });
 }
 
 // Make functions available globally for onclick handlers
 window.editPerson = editPerson;
 window.deletePerson = deletePerson;
+window.deleteNews = deleteNews;
 
 // Escape HTML to prevent XSS
 function escapeHtml(text) {
