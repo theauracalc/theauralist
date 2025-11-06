@@ -132,7 +132,7 @@ header h1::after {
     display: inline-flex;
     align-items: center;
     white-space: nowrap;
-    animation: scroll-news 30s linear infinite;
+    animation: scroll-news 15s linear infinite;
     gap: 20px;
 }
 
@@ -785,4 +785,5 @@ header h1::after {
         grid-template-columns: 1fr;
     }
 }
+
 
