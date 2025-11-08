@@ -213,9 +213,12 @@ async function calculateScoreFromVotes(personId) {
 
         if (error) throw error;
 
+        // Base score is 150 - everyone starts here
+        const BASE_SCORE = 150;
+        
         if (!votes || votes.length === 0) {
-            // If no votes, return 0 (scores are now calculated from votes)
-            return 0;
+            // If no votes, return base score of 150
+            return BASE_SCORE;
         }
 
         // Count upvotes and downvotes
@@ -233,7 +236,7 @@ async function calculateScoreFromVotes(personId) {
         
         // Fair scoring formula that prevents extreme scores with few users:
         // Combines approval ratio with vote count for balanced scoring
-        // Scores typically range from -150 to +150 with normal voting patterns
+        // Scores can go below zero with enough downvotes
         
         const netVotes = upvotes - downvotes;
         const approvalRatio = totalVotes > 0 ? upvotes / totalVotes : 0.5;
@@ -244,22 +247,26 @@ async function calculateScoreFromVotes(personId) {
         // This means: 1 vote = 0.5, 4 votes = 1.0, 16 votes = 2.0 (max)
         const confidenceFactor = Math.min(2.0, Math.sqrt(totalVotes) / 2);
         
-        // Calculate score using approval ratio as a multiplier
+        // Calculate score change from votes using approval ratio as a multiplier
         // This rewards both having many positive votes AND high approval percentage
-        // Example: 10 up, 0 down = 10 * 1.0 * confidence = high score
-        // Example: 5 up, 5 down = 0 * 0.5 * confidence = 0 (neutral)
-        // Example: 8 up, 2 down = 6 * 0.8 * confidence = good score
+        // Example: 10 up, 0 down = 10 * 1.0 * confidence = positive change
+        // Example: 5 up, 5 down = 0 * 0.5 * confidence = 0 (neutral change)
+        // Example: 0 up, 10 down = -10 * 0.0 * confidence = negative change
         
-        const baseScore = netVotes * approvalRatio;
+        const voteScoreChange = netVotes * approvalRatio;
         
         // Apply confidence and scale to reasonable range
-        // Multiplier of 8 keeps scores fair but meaningful
-        const score = Math.round(baseScore * confidenceFactor * 8);
+        // Multiplier of 8 keeps score changes fair but meaningful
+        const scoreChange = Math.round(voteScoreChange * confidenceFactor * 8);
         
-        return score;
+        // Add base score (150) to the vote-based change
+        // This allows scores to go below zero if there are enough downvotes
+        const finalScore = BASE_SCORE + scoreChange;
+        
+        return finalScore;
     } catch (error) {
         console.error('Error calculating score:', error);
-        return 0;
+        return 150; // Return base score on error
     }
 }
 
