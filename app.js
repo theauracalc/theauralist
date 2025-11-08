@@ -1461,14 +1461,14 @@ function updateChatUI() {
             chatSendBtn.disabled = true;
             chatInput.placeholder = 'Click to set username first';
             chatInput.style.cursor = 'pointer';
-            chatInput.onclick = () => openModal(usernameModal);
+            chatInput.style.pointerEvents = 'auto'; // Allow clicks even when disabled
         } else {
             // User has username - enable chat
             chatInput.disabled = false;
             chatSendBtn.disabled = false;
             chatInput.placeholder = 'Type your message...';
             chatInput.style.cursor = 'text';
-            chatInput.onclick = null;
+            chatInput.style.pointerEvents = 'auto';
             chatInput.setAttribute('data-username', userUsername);
         }
     } else {
@@ -1477,7 +1477,7 @@ function updateChatUI() {
         chatSendBtn.disabled = true;
         chatInput.placeholder = 'Type your message... (Login to chat)';
         chatInput.style.cursor = 'not-allowed';
-        chatInput.onclick = null;
+        chatInput.style.pointerEvents = 'none';
     }
 }
 
@@ -1837,7 +1837,15 @@ function setupEventListeners() {
 
     // Chat send button
     if (chatSendBtn) {
-        chatSendBtn.addEventListener('click', sendChatMessage);
+        chatSendBtn.addEventListener('click', (e) => {
+            // If no username, open modal instead of sending
+            if (currentUser && !userUsername) {
+                e.preventDefault();
+                openModal(usernameModal);
+            } else {
+                sendChatMessage();
+            }
+        });
     }
 
     // Chat input - Enter key to send
@@ -1846,6 +1854,14 @@ function setupEventListeners() {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendChatMessage();
+            }
+        });
+
+        // Chat input click - open username modal if needed
+        chatInput.addEventListener('click', (e) => {
+            if (currentUser && !userUsername) {
+                e.preventDefault();
+                openModal(usernameModal);
             }
         });
     }
