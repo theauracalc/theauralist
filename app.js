@@ -234,30 +234,28 @@ async function calculateScoreFromVotes(personId) {
 
         const totalVotes = upvotes + downvotes;
         
-        // Fair scoring formula that prevents extreme scores with few users:
-        // Combines approval ratio with vote count for balanced scoring
-        // Scores can go below zero with enough downvotes
+        // Fair scoring formula that allows scores to go below 150 with downvotes
+        // Uses net votes directly so downvotes can reduce score below base
         
         const netVotes = upvotes - downvotes;
-        const approvalRatio = totalVotes > 0 ? upvotes / totalVotes : 0.5;
         
-        // Confidence factor: logarithmic scaling based on total votes
-        // More votes = higher confidence, but caps to prevent extreme scores
-        // Formula: sqrt(totalVotes) / 2, capped at 2.0
-        // This means: 1 vote = 0.5, 4 votes = 1.0, 16 votes = 2.0 (max)
-        const confidenceFactor = Math.min(2.0, Math.sqrt(totalVotes) / 2);
+        // Use approval ratio only for positive scores (to reward high approval)
+        // For negative net votes, use them directly so downvotes work
+        let scoreChange;
         
-        // Calculate score change from votes using approval ratio as a multiplier
-        // This rewards both having many positive votes AND high approval percentage
-        // Example: 10 up, 0 down = 10 * 1.0 * confidence = positive change
-        // Example: 5 up, 5 down = 0 * 0.5 * confidence = 0 (neutral change)
-        // Example: 0 up, 10 down = -10 * 0.0 * confidence = negative change
-        
-        const voteScoreChange = netVotes * approvalRatio;
-        
-        // Apply confidence and scale to reasonable range
-        // Multiplier of 8 keeps score changes fair but meaningful
-        const scoreChange = Math.round(voteScoreChange * confidenceFactor * 8);
+        if (netVotes >= 0) {
+            // Positive or neutral: use approval ratio to reward high approval percentage
+            const approvalRatio = totalVotes > 0 ? upvotes / totalVotes : 0.5;
+            const confidenceFactor = Math.min(2.0, Math.sqrt(totalVotes) / 2);
+            scoreChange = Math.round(netVotes * approvalRatio * confidenceFactor * 8);
+        } else {
+            // Negative: use net votes directly so downvotes can reduce score below 150
+            // Apply confidence factor but don't use approval ratio (which would be 0)
+            const confidenceFactor = Math.min(2.0, Math.sqrt(totalVotes) / 2);
+            // For downvotes, we want them to have impact, so use a multiplier
+            // This allows scores to go below 150 and even below 0
+            scoreChange = Math.round(netVotes * confidenceFactor * 8);
+        }
         
         // Add base score (150) to the vote-based change
         // This allows scores to go below zero if there are enough downvotes
