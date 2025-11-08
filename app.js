@@ -18,6 +18,8 @@ let currentUser = null; // Current authenticated user
 let userVotes = {}; // Map of person_id -> vote_type for current user
 let lastNewsCheck = null; // Track last news check for notifications
 let newsCheckInterval = null; // Interval for checking new news
+let chatSubscription = null; // Real-time chat subscription
+let chatCleanupInterval = null; // Interval for cleaning up old messages
 
 // Admin User ID - Get this from Supabase Auth after creating your admin account
 // Go to Supabase Dashboard → Authentication → Users → Copy your User ID
@@ -53,6 +55,12 @@ const newsList = document.getElementById('newsList');
 const newsTickerContainer = document.getElementById('newsTickerContainer');
 const featuredUsers = document.getElementById('featuredUsers');
 const trendingUsers = document.getElementById('trendingUsers');
+const chatMessages = document.getElementById('chatMessages');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSendBtn');
+const usernameModal = document.getElementById('usernameModal');
+const usernameForm = document.getElementById('usernameForm');
+let userUsername = null; // Store current user's username
 
 // Initial data (fallback if Supabase is not configured)
 const initialData = [
@@ -161,6 +169,14 @@ async function init() {
         
         // Start news notifications
         startNewsNotifications();
+        
+        // Load chat and set up real-time
+        await loadChatMessages();
+        setupChatRealtime();
+        startChatCleanup();
+        
+        // Start polling as backup (will work even if real-time fails)
+        startChatPolling();
     } catch (error) {
         console.error('Error initializing:', error);
         // Fallback to local data
@@ -606,15 +622,18 @@ async function checkUserAuth() {
         
         if (session && session.user) {
             currentUser = session.user;
+            await loadUserUsername(); // Load username when checking auth
             updateUserAuthUI();
         } else {
             currentUser = null;
             userVotes = {};
+            userUsername = null;
             updateUserAuthUI();
         }
     } catch (error) {
         console.error('Error checking user auth:', error);
         currentUser = null;
+        userUsername = null;
     }
 }
 
@@ -641,6 +660,22 @@ async function userSignup(email, password, confirmPassword) {
         return false;
     }
 
+    const username = document.getElementById('signupUsername')?.value.trim();
+    if (!username) {
+        showUserAuthError('Username is required');
+        return false;
+    }
+
+    if (username.length < 3 || username.length > 20) {
+        showUserAuthError('Username must be between 3 and 20 characters');
+        return false;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        showUserAuthError('Username can only contain letters, numbers, and underscores');
+        return false;
+    }
+
     try {
         const { data, error } = await supabase.auth.signUp({
             email: email,
@@ -654,12 +689,34 @@ async function userSignup(email, password, confirmPassword) {
 
         if (data.user) {
             currentUser = data.user;
+            
+            // Create user profile with username
+            const { error: profileError } = await supabase
+                .from('user_profiles')
+                .insert([{
+                    user_id: currentUser.id,
+                    username: username
+                }]);
+
+            if (profileError) {
+                // Check if username is taken
+                if (profileError.code === '23505') {
+                    showUserAuthError('Username is already taken. Please choose another.');
+                    return false;
+                }
+                console.error('Error creating profile:', profileError);
+                showUserAuthError('Error setting up profile. Please try again.');
+                return false;
+            }
+
+            userUsername = username;
             updateUserAuthUI();
             closeModal(userAuthModal);
             userSignupForm.reset();
             hideUserAuthError();
             await loadUserVotes();
             await loadPeople(); // Reload to show vote buttons
+            updateChatUI(); // Enable chat
             return true;
         }
     } catch (error) {
@@ -683,12 +740,14 @@ async function userLogin(email, password) {
 
         if (data.user) {
             currentUser = data.user;
+            await loadUserUsername(); // Load username from profile
             updateUserAuthUI();
             closeModal(userAuthModal);
             userLoginForm.reset();
             hideUserAuthError();
             await loadUserVotes();
             await loadPeople(); // Reload to show vote buttons
+            updateChatUI(); // Enable chat
             return true;
         }
     } catch (error) {
@@ -703,8 +762,10 @@ async function userLogout() {
         await supabase.auth.signOut();
         currentUser = null;
         userVotes = {};
+        userUsername = null;
         updateUserAuthUI();
         await loadPeople(); // Reload to hide vote buttons
+        updateChatUI(); // Update chat UI to disable input
     } catch (error) {
         console.error('Logout error:', error);
     }
@@ -1324,6 +1385,358 @@ async function deleteNews(id) {
     }
 }
 
+// Chat Functions
+async function loadChatMessages() {
+    if (!chatMessages) return;
+
+    try {
+        // Only load messages from last 4 hours
+        const fourHoursAgo = new Date();
+        fourHoursAgo.setHours(fourHoursAgo.getHours() - 4);
+
+        const { data, error } = await supabase
+            .from('chat_messages')
+            .select('*, user_id')
+            .gte('created_at', fourHoursAgo.toISOString())
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        renderChatMessages(data || []);
+        updateChatUI();
+    } catch (error) {
+        console.error('Error loading chat messages:', error);
+        if (chatMessages) {
+            chatMessages.innerHTML = '<div class="chat-error">Unable to load chat. Please refresh.</div>';
+        }
+    }
+}
+
+function renderChatMessages(messages) {
+    if (!chatMessages) return;
+
+    if (messages.length === 0) {
+        chatMessages.innerHTML = '<div class="chat-empty">No messages yet. Be the first to chat!</div>';
+        return;
+    }
+
+    // Store current scroll position
+    const wasAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop <= chatMessages.clientHeight + 100;
+
+    chatMessages.innerHTML = messages.map(msg => {
+        const isCurrentUser = currentUser && msg.user_id === currentUser.id;
+        const time = new Date(msg.created_at).toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit',
+            hour12: true 
+        });
+        
+        return `
+            <div class="chat-message ${isCurrentUser ? 'chat-message-own' : ''}">
+                <div class="chat-message-header">
+                    <span class="chat-username">${escapeHtml(msg.username)}</span>
+                    <span class="chat-time">${time}</span>
+                </div>
+                <div class="chat-message-text">${escapeHtml(msg.message)}</div>
+            </div>
+        `;
+    }).join('');
+
+    // Auto-scroll to bottom only if user was already at bottom
+    if (wasAtBottom) {
+        setTimeout(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }, 100);
+    }
+}
+
+function updateChatUI() {
+    if (!chatInput || !chatSendBtn) return;
+
+    if (currentUser) {
+        // Check if user has a username
+        if (!userUsername) {
+            // User needs to set username first
+            chatInput.disabled = true;
+            chatSendBtn.disabled = true;
+            chatInput.placeholder = 'Click to set username first';
+            chatInput.style.cursor = 'pointer';
+            chatInput.onclick = () => openModal(usernameModal);
+        } else {
+            // User has username - enable chat
+            chatInput.disabled = false;
+            chatSendBtn.disabled = false;
+            chatInput.placeholder = 'Type your message...';
+            chatInput.style.cursor = 'text';
+            chatInput.onclick = null;
+            chatInput.setAttribute('data-username', userUsername);
+        }
+    } else {
+        // User is not logged in - disable chat
+        chatInput.disabled = true;
+        chatSendBtn.disabled = true;
+        chatInput.placeholder = 'Type your message... (Login to chat)';
+        chatInput.style.cursor = 'not-allowed';
+        chatInput.onclick = null;
+    }
+}
+
+// Load user's username from profile
+async function loadUserUsername() {
+    if (!currentUser) {
+        userUsername = null;
+        return;
+    }
+
+    try {
+        const { data, error } = await supabase
+            .from('user_profiles')
+            .select('username')
+            .eq('user_id', currentUser.id)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                // No profile found - user needs to set username
+                userUsername = null;
+            } else {
+                console.error('Error loading username:', error);
+                userUsername = null;
+            }
+        } else {
+            userUsername = data?.username || null;
+        }
+    } catch (error) {
+        console.error('Error loading username:', error);
+        userUsername = null;
+    }
+}
+
+// Set or update username
+async function setUsername(username) {
+    if (!currentUser) return false;
+
+    username = username.trim();
+    if (!username || username.length < 3 || username.length > 20) {
+        showUsernameError('Username must be between 3 and 20 characters');
+        return false;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        showUsernameError('Username can only contain letters, numbers, and underscores');
+        return false;
+    }
+
+    try {
+        // Check if username already exists (for other users)
+        const { data: existing, error: checkError } = await supabase
+            .from('user_profiles')
+            .select('user_id')
+            .eq('username', username)
+            .single();
+
+        if (existing && existing.user_id !== currentUser.id) {
+            showUsernameError('Username is already taken. Please choose another.');
+            return false;
+        }
+
+        // Insert or update username
+        const { error } = await supabase
+            .from('user_profiles')
+            .upsert({
+                user_id: currentUser.id,
+                username: username
+            }, {
+                onConflict: 'user_id'
+            });
+
+        if (error) {
+            if (error.code === '23505') {
+                showUsernameError('Username is already taken. Please choose another.');
+            } else {
+                throw error;
+            }
+            return false;
+        }
+
+        userUsername = username;
+        updateChatUI();
+        closeModal(usernameModal);
+        usernameForm.reset();
+        hideUsernameError();
+        return true;
+    } catch (error) {
+        console.error('Error setting username:', error);
+        showUsernameError('Error setting username. Please try again.');
+        return false;
+    }
+}
+
+function showUsernameError(message) {
+    const errorDiv = document.getElementById('usernameError');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+}
+
+function hideUsernameError() {
+    const errorDiv = document.getElementById('usernameError');
+    if (errorDiv) {
+        errorDiv.style.display = 'none';
+    }
+}
+
+async function sendChatMessage() {
+    if (!currentUser || !chatInput) return;
+
+    // Check if user has username
+    if (!userUsername) {
+        openModal(usernameModal);
+        return;
+    }
+
+    const message = chatInput.value.trim();
+    if (!message) return;
+
+    const username = userUsername;
+
+    try {
+        const { data, error } = await supabase
+            .from('chat_messages')
+            .insert([{
+                user_id: currentUser.id,
+                username: username,
+                message: message
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        // Clear input
+        chatInput.value = '';
+        
+        // Immediately add the message to the UI (optimistic update)
+        if (data) {
+            const messages = await loadChatMessages();
+            // Also trigger a reload to ensure consistency
+            setTimeout(() => loadChatMessages(), 500);
+        }
+    } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Error sending message. Please try again.');
+    }
+}
+
+// Set up real-time chat subscription
+function setupChatRealtime() {
+    // Remove existing subscription if any
+    if (chatSubscription) {
+        chatSubscription.unsubscribe();
+    }
+
+    // Subscribe to new messages
+    chatSubscription = supabase
+        .channel('chat_messages_channel', {
+            config: {
+                broadcast: { self: true }
+            }
+        })
+        .on('postgres_changes', 
+            { 
+                event: 'INSERT', 
+                schema: 'public', 
+                table: 'chat_messages',
+                filter: '*'
+            }, 
+            async (payload) => {
+                console.log('New message received:', payload);
+                // Reload messages to get the new one
+                await loadChatMessages();
+            }
+        )
+        .on('postgres_changes',
+            {
+                event: 'DELETE',
+                schema: 'public',
+                table: 'chat_messages',
+                filter: '*'
+            },
+            async (payload) => {
+                console.log('Message deleted:', payload);
+                await loadChatMessages();
+            }
+        )
+        .subscribe((status) => {
+            console.log('Chat subscription status:', status);
+            if (status === 'SUBSCRIBED') {
+                console.log('Successfully subscribed to chat messages');
+            } else if (status === 'CHANNEL_ERROR') {
+                console.error('Channel error, falling back to polling');
+                startChatPolling();
+            } else if (status === 'TIMED_OUT') {
+                console.warn('Subscription timed out, falling back to polling');
+                startChatPolling();
+            }
+        });
+}
+
+// Fallback polling if real-time doesn't work
+let chatPollingInterval = null;
+
+function startChatPolling() {
+    // Stop existing polling
+    if (chatPollingInterval) {
+        clearInterval(chatPollingInterval);
+    }
+
+    // Poll every 2 seconds for new messages
+    chatPollingInterval = setInterval(async () => {
+        await loadChatMessages();
+    }, 2000);
+}
+
+function stopChatPolling() {
+    if (chatPollingInterval) {
+        clearInterval(chatPollingInterval);
+        chatPollingInterval = null;
+    }
+}
+
+// Clean up old messages every hour
+function startChatCleanup() {
+    // Clean up immediately
+    cleanupOldChatMessages();
+
+    // Then clean up every hour
+    if (chatCleanupInterval) {
+        clearInterval(chatCleanupInterval);
+    }
+
+    chatCleanupInterval = setInterval(() => {
+        cleanupOldChatMessages();
+    }, 3600000); // Every hour
+}
+
+async function cleanupOldChatMessages() {
+    try {
+        const fourHoursAgo = new Date();
+        fourHoursAgo.setHours(fourHoursAgo.getHours() - 4);
+
+        const { error } = await supabase
+            .from('chat_messages')
+            .delete()
+            .lt('created_at', fourHoursAgo.toISOString());
+
+        if (error) {
+            console.error('Error cleaning up old messages:', error);
+        }
+    } catch (error) {
+        console.error('Error in cleanup:', error);
+    }
+}
+
 // Modal functions
 function openModal(modal) {
     modal.classList.add('show');
@@ -1421,6 +1834,49 @@ function setupEventListeners() {
         const password = document.getElementById('adminPassword').value;
         await login(email, password);
     });
+
+    // Chat send button
+    if (chatSendBtn) {
+        chatSendBtn.addEventListener('click', sendChatMessage);
+    }
+
+    // Chat input - Enter key to send
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    }
+
+    // Username form
+    if (usernameForm) {
+        usernameForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('usernameInput').value.trim();
+            await setUsername(username);
+        });
+    }
+
+    // Cancel username button
+    const cancelUsernameBtn = document.getElementById('cancelUsernameBtn');
+    if (cancelUsernameBtn) {
+        cancelUsernameBtn.addEventListener('click', () => {
+            closeModal(usernameModal);
+            usernameForm.reset();
+            hideUsernameError();
+        });
+    }
+
+    // Close username modal with X button
+    if (usernameModal) {
+        usernameModal.querySelector('.close')?.addEventListener('click', () => {
+            closeModal(usernameModal);
+            usernameForm.reset();
+            hideUsernameError();
+        });
+    }
 
     // Add person button
     document.getElementById('addPersonBtn').addEventListener('click', () => {
