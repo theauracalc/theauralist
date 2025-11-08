@@ -14,7 +14,10 @@
     <div class="container">
         <header>
             <h1>THE AURALIST</h1>
-            <button id="adminBtn" class="admin-btn">🔐 Admin</button>
+            <div class="header-buttons">
+                <button id="userAuthBtn" class="user-auth-btn">👤 Login</button>
+                <button id="adminBtn" class="admin-btn">🔐 Admin</button>
+            </div>
         </header>
 
         <!-- Breaking News Ticker -->
@@ -115,6 +118,24 @@
             </div>
         </div>
 
+        <!-- Featured Users Section -->
+        <div class="featured-section">
+            <h2 class="featured-title">⭐ Featured Users</h2>
+            <p class="featured-subtitle">Top 3 by Upvotes</p>
+            <div class="featured-users" id="featuredUsers">
+                <div class="loading">Loading featured users...</div>
+            </div>
+        </div>
+
+        <!-- Trending Now Section -->
+        <div class="trending-section">
+            <h2 class="trending-title">🔥 Trending Now</h2>
+            <p class="trending-subtitle">Recently Voted On</p>
+            <div class="trending-users" id="trendingUsers">
+                <div class="loading">Loading trending...</div>
+            </div>
+        </div>
+
         <!-- People List -->
         <div class="people-list" id="peopleList">
             <div class="loading">Loading...</div>
@@ -126,9 +147,56 @@
         </footer>
     </div>
 
-    <!-- Login Modal -->
+    <!-- User Signup/Login Modal -->
+    <div id="userAuthModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="userAuthTitle">Login / Sign Up</h2>
+            <div class="auth-tabs">
+                <button id="loginTabBtn" class="auth-tab active">Login</button>
+                <button id="signupTabBtn" class="auth-tab">Sign Up</button>
+            </div>
+            <form id="userLoginForm" style="display: block;">
+                <div class="form-group">
+                    <label for="userEmail">Email:</label>
+                    <input type="email" id="userEmail" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="userPassword">Password:</label>
+                    <input type="password" id="userPassword" required autocomplete="current-password">
+                </div>
+                <div id="userAuthError" class="error-message" style="display: none;"></div>
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Login</button>
+                    <button type="button" class="cancel-btn" id="cancelUserAuthBtn">Cancel</button>
+                </div>
+            </form>
+            <form id="userSignupForm" style="display: none;">
+                <div class="form-group">
+                    <label for="signupEmail">Email:</label>
+                    <input type="email" id="signupEmail" required autocomplete="email">
+                </div>
+                <div class="form-group">
+                    <label for="signupPassword">Password:</label>
+                    <input type="password" id="signupPassword" required autocomplete="new-password" minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="signupPasswordConfirm">Confirm Password:</label>
+                    <input type="password" id="signupPasswordConfirm" required autocomplete="new-password" minlength="6">
+                </div>
+                <div id="userSignupError" class="error-message" style="display: none;"></div>
+                <div class="form-actions">
+                    <button type="submit" class="submit-btn">Sign Up</button>
+                    <button type="button" class="cancel-btn" id="cancelSignupBtn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
+            <span class="close">&times;</span>
             <h2>Admin Login</h2>
             <form id="loginForm">
                 <div class="form-group">
@@ -200,5 +268,4 @@
     <script src="app.js"></script>
 </body>
 </html>
-
 
