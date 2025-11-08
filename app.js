@@ -20,6 +20,8 @@ let lastNewsCheck = null; // Track last news check for notifications
 let newsCheckInterval = null; // Interval for checking new news
 let chatSubscription = null; // Real-time chat subscription
 let chatCleanupInterval = null; // Interval for cleaning up old messages
+let lastChatMessageCount = 0; // Track message count to avoid unnecessary re-renders
+let lastChatMessageIds = new Set(); // Track message IDs to detect new messages
 
 // Admin User ID - Get this from Supabase Auth after creating your admin account
 // Go to Supabase Dashboard → Authentication → Users → Copy your User ID
@@ -171,7 +173,7 @@ async function init() {
         startNewsNotifications();
         
         // Load chat and set up real-time
-        await loadChatMessages();
+        await loadChatMessages(true); // Force initial render
         setupChatRealtime();
         startChatCleanup();
         
@@ -1386,7 +1388,7 @@ async function deleteNews(id) {
 }
 
 // Chat Functions
-async function loadChatMessages() {
+async function loadChatMessages(forceRender = false) {
     if (!chatMessages) return;
 
     try {
@@ -1402,7 +1404,22 @@ async function loadChatMessages() {
 
         if (error) throw error;
 
-        renderChatMessages(data || []);
+        const messages = data || [];
+        
+        // Only re-render if there are actual changes (new messages or count changed)
+        const currentMessageCount = messages.length;
+        const currentMessageIds = new Set(messages.map(m => m.id));
+        
+        // Check if there are new messages
+        const hasNewMessages = messages.some(msg => !lastChatMessageIds.has(msg.id));
+        const countChanged = currentMessageCount !== lastChatMessageCount;
+        
+        if (forceRender || hasNewMessages || countChanged) {
+            renderChatMessages(messages);
+            lastChatMessageCount = currentMessageCount;
+            lastChatMessageIds = currentMessageIds;
+        }
+        
         updateChatUI();
     } catch (error) {
         console.error('Error loading chat messages:', error);
@@ -1456,28 +1473,34 @@ function updateChatUI() {
     if (currentUser) {
         // Check if user has a username
         if (!userUsername) {
-            // User needs to set username first
-            chatInput.disabled = true;
+            // User needs to set username first - make it look disabled but still clickable
+            chatInput.readOnly = true;
+            chatInput.disabled = false; // Don't disable, use readOnly instead
             chatSendBtn.disabled = true;
             chatInput.placeholder = 'Click to set username first';
             chatInput.style.cursor = 'pointer';
-            chatInput.style.pointerEvents = 'auto'; // Allow clicks even when disabled
+            chatInput.style.backgroundColor = 'rgba(26, 26, 26, 0.5)'; // Visual feedback
+            chatInput.setAttribute('data-needs-username', 'true');
         } else {
             // User has username - enable chat
+            chatInput.readOnly = false;
             chatInput.disabled = false;
             chatSendBtn.disabled = false;
             chatInput.placeholder = 'Type your message...';
             chatInput.style.cursor = 'text';
-            chatInput.style.pointerEvents = 'auto';
+            chatInput.style.backgroundColor = ''; // Reset background
+            chatInput.removeAttribute('data-needs-username');
             chatInput.setAttribute('data-username', userUsername);
         }
     } else {
         // User is not logged in - disable chat
+        chatInput.readOnly = true;
         chatInput.disabled = true;
         chatSendBtn.disabled = true;
         chatInput.placeholder = 'Type your message... (Login to chat)';
         chatInput.style.cursor = 'not-allowed';
-        chatInput.style.pointerEvents = 'none';
+        chatInput.style.backgroundColor = '';
+        chatInput.removeAttribute('data-needs-username');
     }
 }
 
@@ -1617,11 +1640,9 @@ async function sendChatMessage() {
         // Clear input
         chatInput.value = '';
         
-        // Immediately add the message to the UI (optimistic update)
+        // Force reload to show the new message
         if (data) {
-            const messages = await loadChatMessages();
-            // Also trigger a reload to ensure consistency
-            setTimeout(() => loadChatMessages(), 500);
+            await loadChatMessages(true);
         }
     } catch (error) {
         console.error('Error sending message:', error);
@@ -1652,8 +1673,8 @@ function setupChatRealtime() {
             }, 
             async (payload) => {
                 console.log('New message received:', payload);
-                // Reload messages to get the new one
-                await loadChatMessages();
+                // Force reload to show the new message
+                await loadChatMessages(true);
             }
         )
         .on('postgres_changes',
@@ -1665,7 +1686,7 @@ function setupChatRealtime() {
             },
             async (payload) => {
                 console.log('Message deleted:', payload);
-                await loadChatMessages();
+                await loadChatMessages(true);
             }
         )
         .subscribe((status) => {
@@ -1691,10 +1712,11 @@ function startChatPolling() {
         clearInterval(chatPollingInterval);
     }
 
-    // Poll every 2 seconds for new messages
+    // Poll every 5 seconds for new messages (reduced frequency to reduce flickering)
+    // Only check for new messages, don't force re-render
     chatPollingInterval = setInterval(async () => {
-        await loadChatMessages();
-    }, 2000);
+        await loadChatMessages(false); // Don't force render, only update if there are changes
+    }, 5000); // Increased from 2 to 5 seconds
 }
 
 function stopChatPolling() {
@@ -1859,9 +1881,28 @@ function setupEventListeners() {
 
         // Chat input click - open username modal if needed
         chatInput.addEventListener('click', (e) => {
-            if (currentUser && !userUsername) {
+            const needsUsername = chatInput.getAttribute('data-needs-username') === 'true';
+            if (needsUsername && currentUser && !userUsername) {
                 e.preventDefault();
-                openModal(usernameModal);
+                e.stopPropagation();
+                console.log('Opening username modal...');
+                if (usernameModal) {
+                    openModal(usernameModal);
+                } else {
+                    console.error('Username modal element not found');
+                }
+            }
+        });
+
+        // Also handle mousedown for better compatibility
+        chatInput.addEventListener('mousedown', (e) => {
+            const needsUsername = chatInput.getAttribute('data-needs-username') === 'true';
+            if (needsUsername && currentUser && !userUsername) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (usernameModal) {
+                    openModal(usernameModal);
+                }
             }
         });
     }
