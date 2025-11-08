@@ -699,34 +699,80 @@ async function userSignup(email, password, confirmPassword) {
         if (data.user) {
             currentUser = data.user;
             
-            // Create user profile with username
-            const { error: profileError } = await supabase
-                .from('user_profiles')
-                .insert([{
-                    user_id: currentUser.id,
-                    username: username
-                }]);
+            // If email confirmation is enabled, session might not be available immediately
+            // In that case, we'll create the profile after email confirmation
+            if (data.session) {
+                // Session is available immediately (email confirmation disabled)
+                // Set the session to ensure RLS policies work
+                await supabase.auth.setSession({
+                    access_token: data.session.access_token,
+                    refresh_token: data.session.refresh_token
+                });
+                
+                // Small delay to ensure session is propagated
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // Create user profile with username
+                const { error: profileError } = await supabase
+                    .from('user_profiles')
+                    .insert([{
+                        user_id: currentUser.id,
+                        username: username
+                    }]);
 
-            if (profileError) {
-                // Check if username is taken
-                if (profileError.code === '23505') {
-                    showUserAuthError('Username is already taken. Please choose another.');
+                if (profileError) {
+                    // Check if username is taken (unique constraint violation)
+                    if (profileError.code === '23505' || profileError.message?.includes('unique')) {
+                        // Username is taken - sign out the user since we can't complete signup
+                        await supabase.auth.signOut();
+                        showUserAuthError('Username is already taken. Please choose another.');
+                        return false;
+                    }
+                    // Check if table doesn't exist
+                    if (profileError.code === '42P01' || profileError.message?.includes('does not exist')) {
+                        // Sign out the user since profile creation failed
+                        await supabase.auth.signOut();
+                        showUserAuthError('Database table not found. Please contact admin.');
+                        console.error('Error: user_profiles table does not exist. Run CREATE_USER_PROFILES_TABLE.sql');
+                        return false;
+                    }
+                    // Check if RLS policy is blocking
+                    if (profileError.code === '42501' || profileError.message?.includes('permission') || profileError.message?.includes('policy')) {
+                        // Profile creation failed but user account exists
+                        // Don't sign out - let them try to set username on next login
+                        console.error('Error: RLS policy blocking insert:', profileError);
+                        showUserAuthError('Account created! Please log in to set your username.');
+                        closeModal(userAuthModal);
+                        userSignupForm.reset();
+                        hideUserAuthError();
+                        // Sign out so they can log in fresh
+                        await supabase.auth.signOut();
+                        return false;
+                    }
+                    // Other errors - sign out and show error
+                    console.error('Error creating profile:', profileError);
+                    await supabase.auth.signOut();
+                    showUserAuthError(`Error setting up profile: ${profileError.message || 'Please try again.'}`);
                     return false;
                 }
-                console.error('Error creating profile:', profileError);
-                showUserAuthError('Error setting up profile. Please try again.');
+
+                userUsername = username;
+                updateUserAuthUI();
+                closeModal(userAuthModal);
+                userSignupForm.reset();
+                hideUserAuthError();
+                await loadUserVotes();
+                await loadPeople(); // Reload to show vote buttons
+                updateChatUI(); // Enable chat
+                return true;
+            } else {
+                // Email confirmation is enabled - user needs to confirm email first
+                // Profile will be created when they log in after confirmation
+                showUserAuthError('Please check your email to confirm your account. After confirmation, you can log in and set your username.');
+                closeModal(userAuthModal);
+                userSignupForm.reset();
                 return false;
             }
-
-            userUsername = username;
-            updateUserAuthUI();
-            closeModal(userAuthModal);
-            userSignupForm.reset();
-            hideUserAuthError();
-            await loadUserVotes();
-            await loadPeople(); // Reload to show vote buttons
-            updateChatUI(); // Enable chat
-            return true;
         }
     } catch (error) {
         console.error('Signup error:', error);
@@ -750,6 +796,19 @@ async function userLogin(email, password) {
         if (data.user) {
             currentUser = data.user;
             await loadUserUsername(); // Load username from profile
+            
+            // If user doesn't have a profile yet (signup might have failed), prompt for username
+            if (!userUsername) {
+                // User exists but no profile - they need to set username
+                updateUserAuthUI();
+                closeModal(userAuthModal);
+                userLoginForm.reset();
+                hideUserAuthError();
+                // Open username modal to set username
+                openModal(usernameModal);
+                return true;
+            }
+            
             updateUserAuthUI();
             closeModal(userAuthModal);
             userLoginForm.reset();
