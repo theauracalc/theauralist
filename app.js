@@ -247,7 +247,8 @@ let userVotesRefreshInterval = null; // Interval for refreshing user votes (to c
                 return BASE_SCORE;
             }
 
-            // Get only the most recent vote per user (to handle 24-hour voting reset)
+            // Get only the most recent vote per user (handles daily voting reset - counts all historical votes)
+            // This ensures scores accumulate over time while allowing daily re-voting
             const mostRecentVotesByUser = {};
             votes.forEach(vote => {
                 if (!mostRecentVotesByUser[vote.user_id]) {
@@ -490,7 +491,7 @@ let userVotesRefreshInterval = null; // Interval for refreshing user votes (to c
     function getCurrentVotingPeriodStartUTC() {
         const now = new Date();
         
-        // Get current time components in France timezone
+        // Get current time components in France timezone (Europe/Paris)
         const franceFormatter = new Intl.DateTimeFormat('en-US', {
             timeZone: 'Europe/Paris',
             year: 'numeric',
@@ -508,39 +509,72 @@ let userVotesRefreshInterval = null; // Interval for refreshing user votes (to c
         const franceHour = parseInt(parts.find(p => p.type === 'hour').value);
         const franceMinute = parseInt(parts.find(p => p.type === 'minute').value);
         
-        // Determine if we're past 9:30 PM France time
+        // Determine if we're past 9:30 PM France time today
         const isAfterReset = franceHour > 21 || (franceHour === 21 && franceMinute >= 30);
         
-        // Calculate the reset date (9:30 PM France time)
+        // Calculate which day the reset occurred on
+        let resetYear = franceYear;
+        let resetMonth = franceMonth;
         let resetDay = franceDay;
+        
         if (!isAfterReset) {
-            // Before 9:30 PM, reset was yesterday
+            // Before 9:30 PM, reset was yesterday at 9:30 PM
             resetDay = franceDay - 1;
-            // Handle month/year rollover
             if (resetDay < 1) {
-                const prevMonth = new Date(franceYear, franceMonth, 0);
-                resetDay = prevMonth.getDate();
-                // Would need to handle year rollover too, but for simplicity...
+                // Previous month
+                resetMonth = franceMonth - 1;
+                if (resetMonth < 0) {
+                    resetMonth = 11;
+                    resetYear = franceYear - 1;
+                }
+                // Get last day of previous month
+                const lastDay = new Date(resetYear, resetMonth + 1, 0).getDate();
+                resetDay = lastDay;
             }
         }
         
-        // Create a date representing 9:30 PM France time
-        // We'll create it as if it were a local time, then convert
-        const franceResetDate = new Date(franceYear, franceMonth, resetDay, 21, 30, 0, 0);
+        // Use a reliable method to convert 9:30 PM France time to UTC
+        // Method: Create a date string and use Intl to calculate the UTC equivalent
+        // This properly handles DST (Daylight Saving Time) changes automatically
         
-        // Now we need to convert this "France local time" to UTC
-        // Get the timezone offset for France
-        const tempDate = new Date();
-        const franceString = tempDate.toLocaleString('en-US', { timeZone: 'Europe/Paris' });
-        const utcString = tempDate.toLocaleString('en-US', { timeZone: 'UTC' });
+        // Create an ISO string for 9:30 PM on the reset day
+        const resetDateStr = `${resetYear}-${String(resetMonth + 1).padStart(2, '0')}-${String(resetDay).padStart(2, '0')}T21:30:00`;
         
-        // Calculate offset: difference between UTC and France time
-        const franceDate = new Date(franceString);
-        const utcDate = new Date(utcString);
+        // Use a workaround: create a date and calculate what UTC time corresponds to this France time
+        // We'll use the fact that we can format a date in both timezones to get the offset
+        
+        // Create a date object for the reset time (treating it as if it were in France timezone)
+        // We'll use a reference date to calculate the timezone offset
+        const testDate = new Date(resetYear, resetMonth, resetDay, 12, 0, 0); // Noon on reset day
+        
+        // Get what time this represents in France timezone
+        const franceTestStr = testDate.toLocaleString('en-US', { timeZone: 'Europe/Paris', hour12: false });
+        const utcTestStr = testDate.toLocaleString('en-US', { timeZone: 'UTC', hour12: false });
+        
+        // Parse both to get the offset
+        const parseTimeStr = (str) => {
+            // Format: "M/D/YYYY, HH:mm:ss"
+            const [datePart, timePart] = str.split(', ');
+            const [m, d, y] = datePart.split('/');
+            const [h, min, s] = timePart.split(':');
+            return { year: parseInt(y), month: parseInt(m) - 1, day: parseInt(d), hour: parseInt(h), minute: parseInt(min) };
+        };
+        
+        const franceTest = parseTimeStr(franceTestStr);
+        const utcTest = parseTimeStr(utcTestStr);
+        
+        // Create Date objects from the parsed times
+        const franceDate = new Date(franceTest.year, franceTest.month, franceTest.day, franceTest.hour, franceTest.minute);
+        const utcDate = new Date(utcTest.year, utcTest.month, utcTest.day, utcTest.hour, utcTest.minute);
+        
+        // Calculate offset: difference between France time and UTC for this date
         const offsetMs = franceDate.getTime() - utcDate.getTime();
         
-        // Apply offset to get UTC time
-        const utcResetDate = new Date(franceResetDate.getTime() - offsetMs);
+        // Now create the actual reset time (9:30 PM France time)
+        const franceResetTime = new Date(resetYear, resetMonth, resetDay, 21, 30, 0, 0);
+        
+        // Convert to UTC by subtracting the offset
+        const utcResetDate = new Date(franceResetTime.getTime() - offsetMs);
         
         return utcResetDate;
     }
@@ -579,8 +613,11 @@ let userVotesRefreshInterval = null; // Interval for refreshing user votes (to c
                 });
             }
 
-            // Re-render people to show vote status
-            renderPeople();
+            // Re-render people to show vote status (only if needed)
+            // Don't re-render if people list hasn't loaded yet
+            if (allPeople.length > 0) {
+                renderPeople();
+            }
         } catch (error) {
             console.error('Error loading user votes:', error);
         }
@@ -1184,8 +1221,12 @@ let userVotesRefreshInterval = null; // Interval for refreshing user votes (to c
             // Update the vote buttons UI for this person
             updatePersonVoteButtons(personId);
             
-            // Reload user votes to refresh the state
-            await loadUserVotes();
+            // Update local userVotes state
+            // Note: userVotes is already updated in the conditions above
+            // Just ensure it's set correctly for the new vote case
+            if (!existingVote || !isInCurrentPeriod) {
+                userVotes[personId] = voteType;
+            }
         } catch (error) {
             console.error('Error voting:', error);
             alert('Error submitting vote. Please try again.');
