@@ -2,7 +2,7 @@ const SUPABASE_URL = 'https://sxhsqkyhflepeaexvqmh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN4aHNxa3loZmxlcGVhZXh2cW1oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI0NTUxNDMsImV4cCI6MjA3ODAzMTE0M30.s2EmGHQr8Ijrs71VHIlEXzagJrUDvOC4y-hY0wOkP0A';
 
 // YOUR ADMIN ID
-const ADMIN_USER_ID = 'your-actual-supabase-user-id-here'; 
+const ADMIN_USER_ID = '50351ca7-3c14-4095-99a9-e6cbb4e6482a'; 
 // Cooldown constant (5 seconds)
 const VOTE_COOLDOWN_MS = 5000; 
 
@@ -122,43 +122,51 @@ async function loadPeople() {
     }
 }
 
+// app.js - Optimized renderPeopleList
 function renderPeopleList() {
     const container = document.getElementById('peopleList');
+    // Use optional chaining just in case the elements aren't loaded (less likely now)
     const filterTxt = document.getElementById('searchInput')?.value.toLowerCase() || '';
     const sortMode = document.getElementById('sortFilter')?.value || 'name_asc';
 
+    // 1. Filtering Logic
     let filtered = appState.people.filter(p => p.name.toLowerCase().includes(filterTxt));
 
+    // 2. Sorting Logic
     filtered.sort((a, b) => {
         if (sortMode === 'score_desc') return b.score - a.score;
         if (sortMode === 'score_asc') return a.score - b.score;
         return a.name.localeCompare(b.name);
     });
 
+    // 3. Render HTML - Use a single innerHTML write for performance
+    // Note: If you want to optimize further (using DOM diffing), you would need a framework like React or Vue, 
+    // but a single innerHTML write is the most performant way in vanilla JS.
     container.innerHTML = filtered.map(p => {
         const voteData = appState.userVotes[p.id];
         let voteType = null;
-        if (voteData && new Date(voteData.created_at) > appState.lastGlobalReset) {
+        // Check if the vote is post-reset date
+        if (voteData && appState.lastGlobalReset && new Date(voteData.created_at) > appState.lastGlobalReset) {
             voteType = voteData.vote_type;
         }
 
+        // Determine score color based on deviation from 150 baseline
         const scoreClass = p.score > 150 ? 'score-pos' : (p.score < 150 ? 'score-neg' : 'score-neu');
 
-        // Added base_score to the card template for debugging (can be removed later)
         return `
-            <div class="person-card">
+            <div class="person-card" data-id="${p.id}">
                 <div class="card-info">
                     <div class="person-name">${escapeHtml(p.name)}</div>
                     <div class="person-score ${scoreClass}">${p.score}</div>
-                    ${appState.isAdmin ? `<small>Base: ${p.base_score}</small>` : ''} 
+                    ${appState.isAdmin ? `<small style="font-size: 10px; color: #888;">Base: ${p.base_score}</small>` : ''} 
                 </div>
                 <div class="vote-actions">
                     <button class="vote-btn up ${voteType === 'up' ? 'active' : ''}" onclick="voteOnPerson(${p.id}, 'up')">Up</button>
                     <button class="vote-btn down ${voteType === 'down' ? 'active' : ''}" onclick="voteOnPerson(${p.id}, 'down')">Down</button>
                 </div>
                 ${appState.isAdmin ? `
-                    <button class="btn-edit-person" onclick="openEditModal(${p.id})">✎</button>
-                    <button class="btn-delete-person" onclick="deletePerson(${p.id})">&times;</button>
+                    <button class="btn-edit-person" onclick="openEditModal(${p.id})" title="Edit Score/Name">✎</button>
+                    <button class="btn-delete-person" onclick="deletePerson(${p.id})" title="Delete User">&times;</button>
                 ` : ''}
             </div>
         `;
