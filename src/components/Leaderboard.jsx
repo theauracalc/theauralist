@@ -1,9 +1,10 @@
 // src/components/Leaderboard.jsx
-
+import NewsBanner from './NewsBanner'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import PersonCard from './PersonCard'
 import { TrendingUp, Trophy, Flame, Search } from 'lucide-react'
+
 
 export default function Leaderboard() {
   const [people, setPeople] = useState([])
@@ -160,3 +161,4 @@ export default function Leaderboard() {
     </div>
   )
 }
+
