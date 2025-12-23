@@ -7,25 +7,23 @@ import { TrendingUp, Trophy, Flame, Search } from 'lucide-react'
 
 function NewsBanner() {
   return (
-    <div className="mb-6 rounded-2xl glass-dark border border-purple-500/40 p-3 sm:p-4 text-sm text-white/80">
-      <div className="font-extrabold text-base sm:text-lg mb-1 text-white">
+    <div className="mb-6 rounded-2xl glass-dark border border-purple-500/40 p-4 sm:p-5 text-sm sm:text-base text-white/80 text-center">
+      <div className="font-extrabold text-lg sm:text-xl mb-2 text-white">
         📰 Aura List v2
       </div>
-      <p className="mb-1">
+      <p className="mb-2">
         New look, same chaos. If the site got prettier, maybe y&apos;all&apos;s aura will too.
       </p>
-      <p className="mb-1">
+      <p className="mb-2">
         24h cooldown per person, up or down. Make your votes count.
-      </p>
-      <p className="text-xs text-white/40">
-        Rising = above your base aura. Falling = below. Don&apos;t end up red.
       </p>
       <p className="text-xs text-white/40">
         Made by Ali, ID: 6152016455
       </p>
     </div>
-  )
+  );
 }
+
 
 
 export default function Leaderboard() {
@@ -186,5 +184,6 @@ export default function Leaderboard() {
     </div>
   )
 }
+
 
 
