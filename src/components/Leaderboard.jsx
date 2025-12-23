@@ -1,3 +1,5 @@
+// src/components/Leaderboard.jsx
+
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import PersonCard from './PersonCard'
@@ -40,20 +42,22 @@ export default function Leaderboard() {
   const filtered = useMemo(() => {
     let result = people
 
-    // Filter by search
+    // Search by name
     if (search) {
-      result = result.filter(p => 
+      result = result.filter(p =>
         p.name.toLowerCase().includes(search.toLowerCase())
       )
     }
 
-    // Filter by category
+    // Filter by rising/falling using change_from_start
     if (filter === 'rising') {
-      result = result.filter(p => p.change_from_start > 0)
-        .sort((a, b) => b.change_from_start - a.change_from_start)
+      result = result
+        .filter(p => (p.change_from_start || 0) > 0)
+        .sort((a, b) => (b.change_from_start || 0) - (a.change_from_start || 0))
     } else if (filter === 'falling') {
-      result = result.filter(p => p.change_from_start < 0)
-        .sort((a, b) => a.change_from_start - b.change_from_start)
+      result = result
+        .filter(p => (p.change_from_start || 0) < 0)
+        .sort((a, b) => (a.change_from_start || 0) - (b.change_from_start || 0))
     }
 
     return result
