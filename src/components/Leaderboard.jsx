@@ -20,6 +20,9 @@ function NewsBanner() {
       <p className="text-xs text-white/40">
         Rising = above your base aura. Falling = below. Don&apos;t end up red.
       </p>
+      <p className="text-xs text-white/40">
+        Made by Ali, ID: 6152016455
+      </p>
     </div>
   )
 }
@@ -183,4 +186,5 @@ export default function Leaderboard() {
     </div>
   )
 }
+
 
