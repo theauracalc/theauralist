@@ -55,3 +55,16 @@ export async function getAnonymousUserId() {
     return newUser.id
   }
 }
+
+// Helper to fetch people list WITHOUT Anon_ users
+export async function getPeopleList() {
+  const { data: allPeople, error } = await supabase
+    .from('people')
+    .select('*')
+    .order('score', { ascending: false })
+  
+  if (error) throw error
+  
+  // Filter out Anon_ users from the list
+  return allPeople?.filter(p => !p.name.startsWith('Anon_')) || []
+}
